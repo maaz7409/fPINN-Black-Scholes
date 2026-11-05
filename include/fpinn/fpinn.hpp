@@ -32,7 +32,7 @@ struct TrainConfig {
     int adam_steps = 6000;  ///< Adam iterations
     double lr = 3e-3;       ///< initial learning rate
     double lr_final = 3e-5; ///< final learning rate (geometric decay)
-    int lbfgs_steps = 1000; ///< L-BFGS iterations after Adam (0 = off)
+    int lbfgs_steps = 2000; ///< L-BFGS iterations after Adam (0 = off)
     int lbfgs_nx = 160;     ///< fixed collocation points in x used by L-BFGS
     std::uint64_t seed = 1234;
     int log_every = 500;
@@ -43,7 +43,7 @@ struct TrainConfig {
     /// Time input of the network is 2 (tau/T)^time_power - 1.  0.5 matches the
     /// sqrt(tau) spreading of diffusion; 1 is a plain linear rescaling.
     double time_power = 0.5;
-    Baseline baseline = Baseline::SubordinatedBS;
+    Baseline baseline = Baseline::None;
     int baseline_nodes = 3;  ///< quadrature nodes of the baseline (1 = BS at the mean random time)
     /// Add the similarity variable (x/L) / ((tau/T)^(alpha/2) + similarity_floor)
     /// as a third network input.

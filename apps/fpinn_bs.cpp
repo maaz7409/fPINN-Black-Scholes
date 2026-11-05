@@ -42,12 +42,12 @@ fPINN
   --adam-steps N        Adam iterations                     [6000]
   --lr LR               initial learning rate               [3e-3]
   --lr-final LR         final learning rate                 [3e-5]
-  --lbfgs-steps N       L-BFGS iterations after Adam        [1000]
+  --lbfgs-steps N       L-BFGS iterations after Adam        [2000]
   --lbfgs-nx N          x collocation points for L-BFGS     [160]
   --scale-residuals 0|1 divide level-n residual by W(n,n)   [1]
   --time-power P        network time input (tau/T)^P        [0.5]
-  --baseline bs|none    subordinated Black-Scholes baseline  [bs]
-  --baseline-nodes Q    random-clock quadrature nodes        [3]
+  --baseline none|bs    subordinated Black-Scholes baseline [none]
+  --baseline-nodes Q    random-clock quadrature nodes       [3]
   --similarity 0|1      similarity-variable network input   [1]
   --similarity-floor D  floor delta in the similarity input [0.05]
   --seed N              random seed                         [1234]
@@ -111,7 +111,7 @@ int main(int argc, char** argv) {
         cfg.lbfgs_nx = args.get("lbfgs-nx", cfg.lbfgs_nx);
         cfg.scale_residuals = args.get("scale-residuals", 1) != 0;
         cfg.time_power = args.get("time-power", cfg.time_power);
-        cfg.baseline = parse_baseline(args.get("baseline", "bs"));
+        cfg.baseline = parse_baseline(args.get("baseline", "none"));
         cfg.baseline_nodes = args.get("baseline-nodes", cfg.baseline_nodes);
         cfg.similarity_feature = args.get("similarity", 1) != 0;
         cfg.similarity_floor = args.get("similarity-floor", cfg.similarity_floor);
