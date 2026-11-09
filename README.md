@@ -21,7 +21,7 @@ D_τ^α V = ½ σ² S² V_SS + r S V_S − r V ,    V(S, 0) = payoff(S),    0 < 
   * boundary conditions are built into the trial solution `v = A + B·N`;
   * the initial condition (payoff) is inserted exactly into the L1 memory sum.
 * **Loss:** mean squared PDE residual, each time level scaled by its L1 diagonal weight.
-* **Optimisers:** Adam with re-sampled collocation points, followed by L-BFGS. OpenMP-parallel.
+* **Optimisers:** Adam with re-sampled collocation points, followed by L-BFGS. OpenMP-parallel and reproducible.
 * **Outputs:** price, Delta and Gamma from the network's exact derivatives.
 * **Optional `--baseline bs`:** a Gauss-quadrature approximation of the model's "random clock" (subordination) representation. The network then learns only a correction.
   The program prints the baseline-alone error too: with 3 nodes the formula alone is already about as accurate as the network.
@@ -33,14 +33,19 @@ D_τ^α V = ½ σ² S² V_SS + r S V_S − r V ,    V(S, 0) = payoff(S),    0 < 
 * Fractional put–call parity holds.
 * The unit tests check every hand-written gradient against finite differences.
 
-Default run (call, K = 100, r = 5 %, σ = 20 %, T = 1, 32-32-32 network, 40 time levels, ~2 min on 4 cores).
+Default run (call, K = 100, r = 5 %, σ = 20 %, T = 1, 32-32-32 network, 40 time levels; about 75 s on 4 threads, 40 s on 8).
 Errors are maximum absolute price errors for S ∈ [50, 150] at τ = T:
 
 | α | fPINN vs reference | rel. L2 |
 |---|---|---|
-| 0.5 | 0.055 | 0.10 % |
-| 0.8 | 0.086 | 0.16 % |
-| 1.0 (vs exact BS) | 0.23 | 0.54 % |
+| 0.5 | 0.047 | 0.10 % |
+| 0.8 | 0.069 | 0.15 % |
+| 1.0 (vs exact BS) | 0.21 | 0.44 % |
+
+With `--baseline bs` (α = 0.8) the error drops to 0.020, but the baseline formula alone already reaches 0.019.
+
+Training is deterministic: the loss and gradient are summed in a fixed order, so a given seed gives
+bit-identical weights for any thread count (on the same compiler and maths library).
 
 ## Build & run
 
@@ -81,7 +86,7 @@ cmake --build build -j
 ## Why no CUDA?
 
 The network has about 2 300 weights and a training step evaluates about 2 500 points: far too little work to benefit from a GPU.
-The CPU version trains in about 2 minutes.
+The CPU version trains in about a minute.
 
 The per-point forward/backward pass is a self-contained function on small arrays. That makes it easy to move into a CUDA kernel if the problem is scaled up, for example to multi-asset models.
 

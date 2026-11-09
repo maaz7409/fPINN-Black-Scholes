@@ -71,8 +71,10 @@ FPINNSolver::FPINNSolver(const FractionalBS& problem, const TrainConfig& cfg)
       net_(layer_sizes(cfg.similarity_feature ? 3 : 2, cfg.hidden)) {
     p_.validate();
     if (cfg_.nx < 1) throw std::invalid_argument("TrainConfig: nx must be >= 1");
-    net_.init_xavier(cfg_.seed);
+    if (cfg_.lbfgs_steps > 0 && cfg_.lbfgs_nx < 1) throw std::invalid_argument("TrainConfig: lbfgs_nx must be >= 1");
+    if (cfg_.log_every < 1) throw std::invalid_argument("TrainConfig: log_every must be >= 1");
     if (!(cfg_.time_power > 0.0)) throw std::invalid_argument("TrainConfig: time_power must be > 0");
+    net_.init_xavier(cfg_.seed);
     const std::vector<double>& tau = op_.grid();
     res_w2_.assign(tau.size(), 1.0);
     if (cfg_.scale_residuals) {
@@ -159,10 +161,13 @@ double FPINNSolver::loss_and_grad(const std::vector<double>& xs, std::vector<dou
 
     const bool use_baseline = cfg_.baseline != Baseline::None;
     std::vector<double> R(static_cast<std::size_t>(N) * S, 0.0);
-    double loss = 0.0;
+    // Per-point partial sums, added up afterwards in a fixed order: floating-point
+    // addition is not associative, so an OpenMP reduction would make training
+    // depend on thread timing and thread count.  This way it is bitwise reproducible.
+    std::vector<double> loss_i(N, 0.0);
 
     // ---- Pass 1: evaluate the trial solution and the residuals. ----
-#pragma omp parallel reduction(+ : loss)
+#pragma omp parallel
     {
         MLP::Workspace ws = net_.make_workspace();
         std::vector<double> u(S), ux(S), uxx(S), z(S), wf(fine_tau_alpha_.size());
@@ -193,10 +198,12 @@ double FPINNSolver::loss_and_grad(const std::vector<double>& xs, std::vector<dou
                     for (std::size_t k = 0; k < row.size(); ++k) dw += row[k] * wf[k];
                 }
                 res[n] = dw + op_.apply(n, z.data()) - (a * uxx[n] + b * ux[n] - r * u[n]);
-                loss += res_w2_[n] * res[n] * res[n];
+                loss_i[i] += res_w2_[n] * res[n] * res[n];
             }
         }
     }
+    double loss = 0.0;
+    for (double l : loss_i) loss += l;
     const double scale = 1.0 / (static_cast<double>(N) * M);
     loss *= scale;
     if (grad == nullptr) return loss;
@@ -208,15 +215,18 @@ double FPINNSolver::loss_and_grad(const std::vector<double>& xs, std::vector<dou
         double* res = R.data() + static_cast<std::size_t>(i) * S;
         for (int n = 1; n <= M; ++n) res[n] *= res_w2_[n];
     }
-    grad->assign(net_.num_params(), 0.0);
+    // One gradient slot per collocation point (N * num_params doubles, a few MB),
+    // summed in index order below for the same reproducibility reason as loss_i.
+    const std::size_t P = net_.num_params();
+    std::vector<double> G(static_cast<std::size_t>(N) * P, 0.0);
 #pragma omp parallel
     {
         MLP::Workspace ws = net_.make_workspace();
-        std::vector<double> g_local(net_.num_params(), 0.0);
         const double L = p_.L;
 #pragma omp for schedule(static)
         for (int i = 0; i < N; ++i) {
             const double* res = R.data() + static_cast<std::size_t>(i) * S;
+            double* g_i = G.data() + static_cast<std::size_t>(i) * P;
             const double x = xs[i];
             const double B = 1.0 - (x / L) * (x / L);
             const double Bx = -2.0 * x / (L * L);
@@ -233,11 +243,18 @@ double FPINNSolver::loss_and_grad(const std::vector<double>& xs, std::vector<dou
                 double in[3], dir[3];
                 inputs(x, tau[j], in, dir);
                 net_.forward(in, dir, ws);
-                net_.backward(seed, ws, g_local.data());
+                net_.backward(seed, ws, g_i);
             }
         }
-#pragma omp critical
-        for (std::size_t k = 0; k < g_local.size(); ++k) (*grad)[k] += g_local[k];
+    }
+    grad->assign(P, 0.0);
+    double* gout = grad->data();
+    const long long Pll = static_cast<long long>(P);
+#pragma omp parallel for schedule(static)
+    for (long long k = 0; k < Pll; ++k) {
+        double s = 0.0;
+        for (int i = 0; i < N; ++i) s += G[static_cast<std::size_t>(i) * P + k];
+        gout[k] = s;
     }
     return loss;
 }

@@ -6,6 +6,10 @@
 #include "check.hpp"
 #include "fpinn/fpinn.hpp"
 
+#ifdef _OPENMP
+#include <omp.h>
+#endif
+
 using namespace fpinn;
 
 int main() {
@@ -54,6 +58,40 @@ int main() {
             CHECK_NEAR(s.solution(0.3, 0.0).v, p.payoff(0.3), 0.0);
           }
         }
+    }
+
+    // Reproducibility: loss and gradient are bitwise independent of the thread count,
+    // and two identical training runs give identical weights.
+    {
+        FractionalBS p;
+        p.alpha = 0.7;
+        TrainConfig cfg;
+        cfg.hidden = {16, 16};
+        cfg.nt = 10;
+        cfg.nx = 37;
+        cfg.adam_steps = 60;
+        cfg.lbfgs_steps = 10;
+        cfg.lbfgs_nx = 41;
+        FPINNSolver s(p, cfg);
+        std::mt19937_64 rng(9);
+        const std::vector<double> xs = s.sample_x(rng, 53);
+        std::vector<double> g_many, g_one;
+        const double l_many = s.loss_and_grad(xs, &g_many);
+#ifdef _OPENMP
+        const int nt = omp_get_max_threads();
+        omp_set_num_threads(1);
+#endif
+        const double l_one = s.loss_and_grad(xs, &g_one);
+#ifdef _OPENMP
+        omp_set_num_threads(nt);
+#endif
+        CHECK(l_many == l_one);
+        CHECK(g_many == g_one);
+
+        FPINNSolver a(p, cfg), b(p, cfg);
+        a.train(nullptr);
+        b.train(nullptr);
+        CHECK(a.net().params() == b.net().params());
     }
 
     // Smoke test: a short training run must reduce the loss substantially.
